@@ -1,0 +1,130 @@
+#data.dir: The directory where the sample.list.file will be saved. data.dir has to be different than data.files.dir
+data.dir <- ""
+#data.files.dir: The directory containing the raw data files. The folder can only contain the text files to be analyzed.
+data.files.dir <- ""
+sample.list.file <- "sample.list.xlsx"
+
+library(dplyr)
+library(ggplot2)
+library(writexl)
+library(viridis)
+library(readxl)
+library(tidyverse)
+
+setwd(data.files.dir)
+
+file.list <- list.files()
+
+sample.list <- data.frame(
+  filename = file.list,
+  source = NA,
+  attribute1 = NA,
+  attribute2 = NA
+)
+
+setwd(data.dir)
+write_xlsx(sample.list, sample.list.file)
+
+stop("Fill generated Excel Sheet with Sample Metadata.")
+
+setwd(data.dir)
+sample.list <- read_xlsx(sample.list.file)
+
+setwd(data.files.dir)
+file.content <- readLines(file.list[1], warn = FALSE)
+file.content <- iconv(file.content, "UTF-8", "ASCII", sub = "")
+file.content <- gsub(",", ".", file.content)
+
+start.index <- grep("Median Volume", file.content)
+
+df1 <- read.table(
+  text = file.content[(start.index + 3) : length(file.content)], 
+  header = FALSE
+)
+
+colnames(df1) <- c("Size", "Number", "Concentration", "Volume", "Area")
+
+end.index <- min(which(df1$Size == -1))
+
+concentration.data <- df1[1:(end.index - 1), ]
+concentration.data <- concentration.data[, 1:2]
+
+process.data.file <- function(filename) {
+  file.content <- readLines(filename, warn = FALSE)
+  file.content <- iconv(file.content, "UTF-8", "ASCII", sub = "")
+  file.content <- gsub(",", ".", file.content)
+  
+  dilution.path <- grep("Dilution::", file.content, value = TRUE)
+  dilution.factor <- as.numeric(gsub(".*Dilution::\\s*(\\d+\\.?\\d*).*", "\\1", dilution.path))
+  
+  start.index <- grep("Median Volume", file.content)
+  
+  preliminary.concentration.data <- read.table(
+    text = file.content[(start.index + 3):length(file.content)], 
+    header = FALSE,
+    col.names = c("Size", "Number", "Concentration", "Volume", "Area")
+  )
+  
+  end.index <- min(which(preliminary.concentration.data$Size == -1))
+  preliminary.concentration.data <- preliminary.concentration.data[1:(end.index - 1), ]
+  preliminary.concentration.data <- mutate_all(preliminary.concentration.data, as.numeric)
+  preliminary.concentration.data$Concentration <- preliminary.concentration.data$Concentration * dilution.factor
+  concentration.data <- cbind(concentration.data, preliminary.concentration.data$Concentration)
+  
+  return(concentration.data)
+}
+
+
+for (filename in file.list) {
+  concentration.data <- process.data.file(filename)
+}
+
+concentration.data <- concentration.data[, -2]
+
+colnames(concentration.data) <- c("Size", file.list)
+concentration.data <- mutate_all(concentration.data, as.numeric)
+
+concentration.data.total.particle <- rbind(colSums(concentration.data), concentration.data)
+
+concentration.data.total.particle[1, 1] <- "Total Particles"
+
+dir.create("Total Particle Counts")
+write_xlsx(concentration.data.total.particle, "Total Particle Counts/Total Particle counts.xlsx")
+
+sample.list.subset <- sample.list %>%
+  group_by(attribute1, attribute2) %>%
+  summarise(filename = list(filename), source = list(source),
+            .groups = "drop")
+
+generate.replicate.plot <- function(concentration.data, sample.list.subset, index) {
+  df3 <- concentration.data[, 1:2]
+  matching.cols <- intersect(sample.list.subset$filename[[index]], names(concentration.data))
+  concentration.data.filter <- concentration.data %>%
+    select(all_of(matching.cols))
+  
+  df3 <- cbind(df3[, -2], concentration.data.filter)
+  colnames(df3) <- c("Size", sample.list.subset$source[[index]])
+  df3.filter <- filter(df3, Size <= 800)
+  df3.long <- df3.filter %>%
+    pivot_longer(cols = -Size, names_to = "Donor", values_to = "Particles/mL")
+  df3.long$Donor <- factor(df3.long$Donor, levels = sort(unique(df3.long$Donor)))
+  
+  plot <- ggplot(df3.long, aes(x = Size, y = `Particles/mL`, color = Donor)) +
+    geom_line(size = 1) +
+    labs(title = paste0(sample.list.subset$attribute1[index], "-", sample.list.subset$attribute2[index]),
+         x = "Size",
+         y = "Particles/mL",
+         color = "Donor") +
+    scale_x_continuous(breaks = seq(0, max(df3.long$Size), by = 100)) +
+    scale_color_viridis_d(labels = levels(df3.long$Donor)) +
+    theme_minimal(base_size = 20) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  
+  dir.create("Compiled Graphs")
+  filename.plot <- paste0(sample.list.subset$attribute1[index], "-", sample.list.subset$attribute2[index], ".png")
+  ggsave(paste0("Compiled Graphs/", filename.plot), plot = plot, width = 20, height = 12, units = "cm", dpi = 600)
+}
+
+for (i in 1:nrow(sample.list.subset)) {
+  generate.replicate.plot(concentration.data, sample.list.subset, i)
+}
