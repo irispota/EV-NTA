@@ -6,7 +6,7 @@ Date: 2025-01-13
 ### Description:
 
 This script processes and analyzes data from Nanoparticle Tracking Analysis (NTA) experimentscommonly used for extracellular vesicle size and concentration measurments. 
-It is compatible with data from ZetaView (Particle Metrix).
+It is compatible with data from ZetaView (Particle Metrix). To use this script for other NTA instruments, modify indices to fit data structure.
 
 It performs the following tasks:
 1. Reads data files: The script reads data files in .txt format from a specified directory.
