@@ -1,7 +1,9 @@
 # EV-NTA
 ## Documentation for NTA Data Processing and Plotting Script
 Author: Iris Potakowskyj
-Date: 2025-01-13
+Date: 2025-05-23
+
+Please cite: 10.5281/zenodo.15497706
 
 ### Description:
 
